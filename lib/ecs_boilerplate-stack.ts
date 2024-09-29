@@ -133,17 +133,33 @@ export class EcsBoilerplateStack extends cdk.Stack {
       securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
     });
 
-    // Create ECR repository
-    const ecr = new cdk.aws_ecr.Repository(this, "ECR", {
-      repositoryName: `${proj}-ecr`,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
     // Create ECS cluster
     const cluster = new cdk.aws_ecs.Cluster(this, "Cluster", {
       clusterName: `${proj}-cluster`,
       vpc: vpc,
     });
+
+    const executionRole = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
+      assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+    });
+
+    executionRole.addManagedPolicy(
+      cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
+        "service-role/AmazonECSTaskExecutionRolePolicy"
+      )
+    );
+
+    executionRole.addToPolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: ["*"],
+      })
+    );
 
     // Create task definition
     const taskDefinition = new cdk.aws_ecs.FargateTaskDefinition(
@@ -152,17 +168,19 @@ export class EcsBoilerplateStack extends cdk.Stack {
       {
         cpu: 256,
         memoryLimitMiB: 512,
+        executionRole: executionRole,
       }
     );
 
     // Add container to task definition
     taskDefinition.addContainer("Container", {
-      image: cdk.aws_ecs.ContainerImage.fromRegistry(
-        "public.ecr.aws/nginx/nginx:1.26.2-alpine3.20"
-      ),
+      image: cdk.aws_ecs.ContainerImage.fromRegistry(process.env.ECR_URI!),
       memoryLimitMiB: 512,
       cpu: 256,
       portMappings: [{ containerPort: 80 }],
+      environment: {
+        PORT: "80",
+      },
     });
 
     // Create Application Load Balancer
@@ -264,7 +282,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
         subnets: privateSubnets.map((subnet) =>
           cdk.aws_ec2.Subnet.fromSubnetAttributes(
             this,
-            `PublicSubnetRef-${subnet.node.id}`,
+            `PrivateSubnetRef-${subnet.node.id}`,
             {
               subnetId: subnet.ref,
               availabilityZone: subnet.availabilityZone,
