@@ -21,34 +21,40 @@ export class EcsBoilerplateStack extends cdk.Stack {
     const availabilityZones = vpc.availabilityZones;
 
     // Create public subnets
-    const publicSubnets: cdk.aws_ec2.Subnet[] = [];
+    const publicSubnets: cdk.aws_ec2.CfnSubnet[] = [];
     for (let i = 0; i < availabilityZones.length; i++) {
       const id = `Public-Subnet-${i + 1}`;
       const cidrBlock = `10.0.${16 * i}.0/20`;
       const availabilityZone = availabilityZones[i];
-      const publicSubnet = new cdk.aws_ec2.Subnet(this, id, {
+      const publicSubnet = new cdk.aws_ec2.CfnSubnet(this, id, {
         vpcId: vpc.vpcId,
         cidrBlock: cidrBlock,
         availabilityZone: availabilityZone,
         mapPublicIpOnLaunch: true,
+        tags: [
+          { key: "Name", value: `${proj}_${id}` },
+          { key: "aws-cdk:subnet-type", value: "Public" },
+        ],
       });
-      cdk.Tags.of(publicSubnet).add("Name", `${proj}_${id}`);
-      cdk.Tags.of(publicSubnet).add("aws-cdk:subnet-type", "Public");
       publicSubnets.push(publicSubnet);
     }
 
     // Create private subnets
-    const privateSubnets: cdk.aws_ec2.Subnet[] = [];
+    const privateSubnets: cdk.aws_ec2.CfnSubnet[] = [];
     for (let i = 0; i < availabilityZones.length; i++) {
       const id = `Private-Subnet-${i + 1}`;
       const cidrBlock = `10.0.${16 * i + 48}.0/20`;
       const availabilityZone = availabilityZones[i];
-      const privateSubnet = new cdk.aws_ec2.Subnet(this, id, {
+      const privateSubnet = new cdk.aws_ec2.CfnSubnet(this, id, {
         vpcId: vpc.vpcId,
         cidrBlock: cidrBlock,
         availabilityZone: availabilityZone,
+        mapPublicIpOnLaunch: false,
+        tags: [
+          { key: "Name", value: `${proj}_${id}` },
+          { key: "aws-cdk:subnet-type", value: "Private" },
+        ],
       });
-      cdk.Tags.of(privateSubnet).add("Name", `${proj}_${id}`);
       privateSubnets.push(privateSubnet);
     }
 
@@ -86,7 +92,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
         this,
         `PublicSubnetAssociation-${index}`,
         {
-          subnetId: subnet.subnetId,
+          subnetId: subnet.ref,
           routeTableId: publicRouteTable.ref,
         }
       );
@@ -102,13 +108,18 @@ export class EcsBoilerplateStack extends cdk.Stack {
       }
     );
 
+    vpcEndpointSecurityGroup.addIngressRule(
+      cdk.aws_ec2.Peer.anyIpv4(),
+      cdk.aws_ec2.Port.allTraffic()
+    );
+
     // Create PrivateLink endpoint for ECR
     new cdk.aws_ec2.CfnVPCEndpoint(this, "ECREndpoint", {
       serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.ecr.dkr`,
       vpcId: vpc.vpcId,
-      privateDnsEnabled: false,
+      privateDnsEnabled: true,
       vpcEndpointType: "Interface",
-      subnetIds: publicSubnets.map((subnet) => subnet.subnetId),
+      subnetIds: privateSubnets.map((subnet) => subnet.ref),
       securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
     });
 
@@ -116,9 +127,9 @@ export class EcsBoilerplateStack extends cdk.Stack {
     new cdk.aws_ec2.CfnVPCEndpoint(this, "ECRApiEndpoint", {
       serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.ecr.api`,
       vpcId: vpc.vpcId,
-      privateDnsEnabled: false,
+      privateDnsEnabled: true,
       vpcEndpointType: "Interface",
-      subnetIds: publicSubnets.map((subnet) => subnet.subnetId),
+      subnetIds: privateSubnets.map((subnet) => subnet.ref),
       securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
     });
 
@@ -146,7 +157,9 @@ export class EcsBoilerplateStack extends cdk.Stack {
 
     // Add container to task definition
     taskDefinition.addContainer("Container", {
-      image: cdk.aws_ecs.ContainerImage.fromEcrRepository(ecr, "1"),
+      image: cdk.aws_ecs.ContainerImage.fromRegistry(
+        "public.ecr.aws/nginx/nginx:1.26.2-alpine3.20"
+      ),
       memoryLimitMiB: 512,
       cpu: 256,
       portMappings: [{ containerPort: 80 }],
@@ -161,7 +174,17 @@ export class EcsBoilerplateStack extends cdk.Stack {
         internetFacing: true,
         loadBalancerName: `${proj}-ALB`,
         vpcSubnets: {
-          subnets: publicSubnets.map((subnet) => subnet),
+          subnets: publicSubnets.map((subnet) =>
+            cdk.aws_ec2.Subnet.fromSubnetAttributes(
+              this,
+              `PublicSubnetRef-${subnet.node.id}`,
+              {
+                subnetId: subnet.ref,
+                availabilityZone: subnet.availabilityZone,
+                routeTableId: publicRouteTable.ref,
+              }
+            )
+          ),
         },
       }
     );
@@ -239,10 +262,13 @@ export class EcsBoilerplateStack extends cdk.Stack {
       securityGroups: [serviceSecurityGroup],
       vpcSubnets: {
         subnets: privateSubnets.map((subnet) =>
-          cdk.aws_ec2.Subnet.fromSubnetId(
+          cdk.aws_ec2.Subnet.fromSubnetAttributes(
             this,
             `PublicSubnetRef-${subnet.node.id}`,
-            subnet.subnetId
+            {
+              subnetId: subnet.ref,
+              availabilityZone: subnet.availabilityZone,
+            }
           )
         ),
       },
