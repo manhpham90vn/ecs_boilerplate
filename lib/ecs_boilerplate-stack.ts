@@ -7,7 +7,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
 
     const proj = process.env.PROJECT_NAME;
 
-    // Create vpc
+    // Create VPC
     const vpc = new cdk.aws_ec2.Vpc(this, "VPC", {
       vpcName: `${proj}-VPC`,
       ipAddresses: cdk.aws_ec2.IpAddresses.cidr("10.0.0.0/16"),
@@ -63,7 +63,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
       tags: [{ key: "Name", value: `${proj}-InternetGateway` }],
     });
 
-    // Attach Internet Gateway to the VPC
+    // Attach Internet Gateway to VPC
     new cdk.aws_ec2.CfnVPCGatewayAttachment(this, "VPCGatewayAttachment", {
       vpcId: vpc.vpcId,
       internetGatewayId: igw.ref,
@@ -79,11 +79,33 @@ export class EcsBoilerplateStack extends cdk.Stack {
       }
     );
 
-    // Add default route to Internet Gateway in the public route table
+    // Create route to Internet Gateway
     new cdk.aws_ec2.CfnRoute(this, "DefaultRoute", {
       routeTableId: publicRouteTable.ref,
       destinationCidrBlock: "0.0.0.0/0",
       gatewayId: igw.ref,
+    });
+
+    // Create route table for private subnets
+    const privateRouteTable = new cdk.aws_ec2.CfnRouteTable(
+      this,
+      "PrivateRouteTable",
+      {
+        vpcId: vpc.vpcId,
+        tags: [{ key: "Name", value: `${proj}-PrivateRouteTable` }],
+      }
+    );
+
+    // Associate private subnets with the private route table
+    privateSubnets.forEach((subnet, index) => {
+      new cdk.aws_ec2.CfnSubnetRouteTableAssociation(
+        this,
+        `PrivateSubnetAssociation-${index}`,
+        {
+          subnetId: subnet.ref,
+          routeTableId: privateRouteTable.ref,
+        }
+      );
     });
 
     // Associate public subnets with the public route table
@@ -98,7 +120,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
       );
     });
 
-    // Create security group for VPC Endpoint
+    // Create security group for VPC endpoint
     const vpcEndpointSecurityGroup = new cdk.aws_ec2.SecurityGroup(
       this,
       "VPCEndpointSG",
@@ -133,33 +155,59 @@ export class EcsBoilerplateStack extends cdk.Stack {
       securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
     });
 
-    // Create ECS cluster
+    // Create PrivateLink endpoint for S3
+    new cdk.aws_ec2.CfnVPCEndpoint(this, "S3Endpoint", {
+      serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.s3`,
+      vpcId: vpc.vpcId,
+      vpcEndpointType: "Gateway",
+      routeTableIds: [privateRouteTable.ref],
+    });
+
+    // Create PrivateLink endpoint for CloudWatch Logs
+    new cdk.aws_ec2.CfnVPCEndpoint(this, "CloudWatchLogsEndpoint", {
+      serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.logs`,
+      vpcId: vpc.vpcId,
+      privateDnsEnabled: true,
+      vpcEndpointType: "Interface",
+      subnetIds: privateSubnets.map((subnet) => subnet.ref),
+      securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
+    });
+
+    // Create ECS Cluster
     const cluster = new cdk.aws_ecs.Cluster(this, "Cluster", {
       clusterName: `${proj}-cluster`,
       vpc: vpc,
     });
 
+    // Create execution role for Fargate
     const executionRole = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
+    // Add managed policies to execution role
     executionRole.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "service-role/AmazonECSTaskExecutionRolePolicy"
       )
     );
 
+    // Add inline policy to execution
     executionRole.addToPolicy(
       new cdk.aws_iam.PolicyStatement({
+        effect: cdk.aws_iam.Effect.ALLOW,
         actions: [
-          "ecr:GetAuthorizationToken",
-          "ecr:BatchCheckLayerAvailability",
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
         ],
         resources: ["*"],
       })
     );
+
+    // Create task role for Fargate
+    const taskRole = new cdk.aws_iam.Role(this, "FargateTaskRole", {
+      assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+    });
 
     // Create task definition
     const taskDefinition = new cdk.aws_ecs.FargateTaskDefinition(
@@ -169,6 +217,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
         cpu: 256,
         memoryLimitMiB: 512,
         executionRole: executionRole,
+        taskRole: taskRole,
       }
     );
 
@@ -183,7 +232,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
       },
     });
 
-    // Create Application Load Balancer
+    // Create ALB
     const alb = new cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer(
       this,
       "ALB",
@@ -207,7 +256,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
       }
     );
 
-    // Create a security group for ALB
+    // Create security group for ALB
     const albSecurityGroup = new cdk.aws_ec2.SecurityGroup(
       this,
       "ALBSecurityGroup",
@@ -217,27 +266,46 @@ export class EcsBoilerplateStack extends cdk.Stack {
       }
     );
 
+    // Allow all inbound traffic on port 80
     albSecurityGroup.addIngressRule(
       cdk.aws_ec2.Peer.anyIpv4(),
       cdk.aws_ec2.Port.tcp(80)
     );
 
+    // Add security group to ALB
     alb.addSecurityGroup(albSecurityGroup);
 
-    // Create listener for ALB
+    // Create listener
     const listener = alb.addListener("Listener", {
       port: 80,
     });
 
-    // Create Target Group
-    const targetGroup =
+    // Create target group for Blue deployment
+    const blueTargetGroup =
       new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
         this,
-        "TargetGroup",
+        "BlueTargetGroup",
         {
-          vpc: vpc,
-          port: 80,
+          vpc,
           protocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
+          port: 80,
+          targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
+          healthCheck: {
+            path: "/",
+            interval: cdk.Duration.seconds(30),
+          },
+        }
+      );
+
+    // Create target group for Green deployment
+    const greenTargetGroup =
+      new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
+        this,
+        "GreenTargetGroup",
+        {
+          vpc,
+          protocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
+          port: 80,
           targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
           healthCheck: {
             path: "/",
@@ -248,7 +316,7 @@ export class EcsBoilerplateStack extends cdk.Stack {
 
     // Add target group to listener
     listener.addTargetGroups("TargetGroups", {
-      targetGroups: [targetGroup],
+      targetGroups: [blueTargetGroup],
     });
 
     // Create a Security Group for the Fargate Service that allows all IPs within the VPC
@@ -265,6 +333,15 @@ export class EcsBoilerplateStack extends cdk.Stack {
     serviceSecurityGroup.addIngressRule(
       cdk.aws_ec2.Peer.ipv4(vpc.vpcCidrBlock),
       cdk.aws_ec2.Port.allTraffic()
+    );
+
+    // Create code deploy
+    const codedeployApp = new cdk.aws_codedeploy.EcsApplication(
+      this,
+      "CodeDeployApplication",
+      {
+        applicationName: `${proj}_CodeDeployApplication`,
+      }
     );
 
     // Create service
@@ -292,7 +369,24 @@ export class EcsBoilerplateStack extends cdk.Stack {
       },
     });
 
-    service.attachToApplicationTargetGroup(targetGroup);
+    // create deployment group
+    new cdk.aws_codedeploy.EcsDeploymentGroup(this, "DeploymentGroup", {
+      service: service,
+      application: codedeployApp,
+      deploymentGroupName: `${proj}_DeploymentGroup`,
+      autoRollback: {
+        failedDeployment: true,
+      },
+      blueGreenDeploymentConfig: {
+        blueTargetGroup: blueTargetGroup,
+        greenTargetGroup: greenTargetGroup,
+        listener: listener,
+        terminationWaitTime: cdk.Duration.minutes(60),
+        deploymentApprovalWaitTime: cdk.Duration.minutes(10),
+      },
+    });
+
+    service.attachToApplicationTargetGroup(blueTargetGroup);
 
     new cdk.CfnOutput(this, "VPC_Id", {
       value: vpc.vpcId,
