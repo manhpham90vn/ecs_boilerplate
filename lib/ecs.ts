@@ -8,6 +8,7 @@ export class ECSStack extends cdk.Stack {
   public readonly greenTargetGroup: cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
   public readonly listener: cdk.aws_elasticloadbalancingv2.ApplicationListener;
   public readonly ecrRepository: cdk.aws_ecr.IRepository;
+  public readonly taskDefinition: cdk.aws_ecs.FargateTaskDefinition;
 
   constructor(
     scope: Construct,
@@ -49,7 +50,7 @@ export class ECSStack extends cdk.Stack {
     });
 
     // Create task definition
-    const taskDefinition = new cdk.aws_ecs.FargateTaskDefinition(
+    this.taskDefinition = new cdk.aws_ecs.FargateTaskDefinition(
       this,
       "TaskDefinition",
       {
@@ -68,7 +69,7 @@ export class ECSStack extends cdk.Stack {
     );
 
     // Add container to task definition
-    taskDefinition.addContainer("Container", {
+    this.taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
       memoryLimitMiB: 512,
       cpu: 256,
@@ -184,7 +185,7 @@ export class ECSStack extends cdk.Stack {
     // Create service
     this.service = new cdk.aws_ecs.FargateService(this, "Service", {
       cluster: cluster,
-      taskDefinition: taskDefinition,
+      taskDefinition: this.taskDefinition,
       desiredCount: 1,
       serviceName: `${proj}_Service`,
       deploymentController: {

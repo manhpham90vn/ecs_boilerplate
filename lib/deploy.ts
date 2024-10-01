@@ -1,6 +1,5 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
-import { VPCStack } from "./vpc";
 import { ECSStack } from "./ecs";
 
 export class DeployStack extends cdk.Stack {
@@ -66,13 +65,42 @@ export class DeployStack extends cdk.Stack {
         environment: {
           buildImage: cdk.aws_codebuild.LinuxBuildImage.STANDARD_5_0,
         },
+        buildSpec: cdk.aws_codebuild.BuildSpec.fromObject({
+          version: "0.2",
+          phases: {
+            build: {
+              commands: [
+                "echo Creating appspec.yml",
+                'echo "version: 0.0" > appspec.yml',
+                'echo "Resources:" >> appspec.yml',
+                'echo "  myEcsService:" >> appspec.yml',
+                'echo "    Type: AWS::CodeDeploy::ECS::DeploymentGroup" >> appspec.yml',
+                'echo "    Properties:" >> appspec.yml',
+                'echo "      TaskDefinition: $TASK_DEFINITION_ARN" >> appspec.yml',
+                'echo "      LoadBalancerInfo:" >> appspec.yml',
+                'echo "        ContainerName: $CONTAINER_NAME" >> appspec.yml',
+                'echo "        ContainerPort: $CONTAINER_PORT" >> appspec.yml',
+              ],
+            },
+          },
+          artifacts: {
+            files: ["appspec.yml", "**/*"],
+          },
+          environment: {
+            variables: {
+              TASK_DEFINITION_ARN: ecsStack.taskDefinition.taskDefinitionArn,
+              CONTAINER_NAME: "web",
+              CONTAINER_PORT: "80",
+            },
+          },
+        }),
       }
     );
 
     // CodeBuild Project (this project builds the image)
     const buildAction = new cdk.aws_codepipeline_actions.CodeBuildAction({
       actionName: "Build",
-      project: codeBuildProject, // Cần tạo project CodeBuild để build artifact
+      project: codeBuildProject,
       input: sourceOutput,
       outputs: [buildOutput],
     });
@@ -89,7 +117,6 @@ export class DeployStack extends cdk.Stack {
       new cdk.aws_codepipeline_actions.CodeDeployEcsDeployAction({
         actionName: "ECS_Deploy",
         deploymentGroup,
-        taskDefinitionTemplateInput: buildOutput,
         appSpecTemplateInput: buildOutput,
       });
 
