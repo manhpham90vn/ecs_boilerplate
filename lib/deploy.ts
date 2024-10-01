@@ -118,6 +118,7 @@ export class DeployStack extends cdk.Stack {
         actionName: "ECS_Deploy",
         deploymentGroup,
         appSpecTemplateInput: buildOutput,
+        taskDefinitionTemplateInput: buildOutput,
       });
 
     // create CodePipeline
