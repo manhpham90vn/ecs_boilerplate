@@ -36,17 +36,11 @@ export class ECSStack extends cdk.Stack {
       )
     );
 
-    // Add inline policy to execution
-    executionRole.addToPolicy(
-      new cdk.aws_iam.PolicyStatement({
-        effect: cdk.aws_iam.Effect.ALLOW,
-        actions: [
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability",
-        ],
-        resources: ["*"],
-      })
+    // Add managed policies to execution role
+    executionRole.addManagedPolicy(
+      cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
+        "CloudWatchLogsFullAccess"
+      )
     );
 
     // Create task role for Fargate
@@ -214,5 +208,26 @@ export class ECSStack extends cdk.Stack {
 
     // Attach service to Blue target group
     this.service.attachToApplicationTargetGroup(this.blueTargetGroup);
+
+    // Enable Auto Scaling for the Fargate service
+    const scalableTarget = this.service.autoScaleTaskCount({
+      minCapacity: 1,
+      maxCapacity: 4,
+    });
+
+    // Configure scaling policy based on CPU utilization
+    scalableTarget.scaleOnCpuUtilization("CpuScaling", {
+      targetUtilizationPercent: 50,
+    });
+
+    // Optionally, you can add scaling based on memory utilization as well
+    scalableTarget.scaleOnMemoryUtilization("MemoryScaling", {
+      targetUtilizationPercent: 70,
+    });
+
+    // Output the DNS name of the ALB
+    new cdk.CfnOutput(this, "ALBDNS", {
+      value: alb.loadBalancerDnsName,
+    });
   }
 }

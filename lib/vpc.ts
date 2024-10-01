@@ -182,5 +182,10 @@ export class VPCStack extends cdk.Stack {
       subnetIds: this.privateSubnets.map((subnet) => subnet.ref),
       securityGroupIds: [vpcEndpointSecurityGroup.securityGroupId],
     });
+
+    // Output VPC ID
+    new cdk.CfnOutput(this, "VPCID", {
+      value: this.vpc.vpcId,
+    });
   }
 }
