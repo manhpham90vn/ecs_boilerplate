@@ -26,6 +26,7 @@ export class VPCStack extends cdk.Stack {
       subnetConfiguration: [],
     });
 
+    // Get availability zones
     const availabilityZones = this.vpc.availabilityZones;
 
     // Create public subnets
@@ -87,7 +88,7 @@ export class VPCStack extends cdk.Stack {
       }
     );
 
-    // Create route to Internet Gateway
+    // Create route for public subnets
     new cdk.aws_ec2.CfnRoute(this, "DefaultRoute", {
       routeTableId: this.publicRouteTable.ref,
       destinationCidrBlock: "0.0.0.0/0",
@@ -138,6 +139,7 @@ export class VPCStack extends cdk.Stack {
       }
     );
 
+    // Allow all inbound traffic
     vpcEndpointSecurityGroup.addIngressRule(
       cdk.aws_ec2.Peer.anyIpv4(),
       cdk.aws_ec2.Port.allTraffic()

@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
 import { ECSStack } from "./ecs";
+import { DeployStack } from "./deploy";
 
 export class EcsBoilerplateStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -18,7 +19,14 @@ export class EcsBoilerplateStack extends cdk.Stack {
       },
     });
 
-    new ECSStack(this, "ECSStack", vpcStack, proj, {
+    const ecsStack = new ECSStack(this, "ECSStack", vpcStack, proj, {
+      env: {
+        account: account,
+        region: region,
+      },
+    });
+
+    new DeployStack(this, "DeployStack", ecsStack, proj, {
       env: {
         account: account,
         region: region,

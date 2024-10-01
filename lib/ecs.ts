@@ -3,6 +3,12 @@ import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
 
 export class ECSStack extends cdk.Stack {
+  public readonly service: cdk.aws_ecs.FargateService;
+  public readonly blueTargetGroup: cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
+  public readonly greenTargetGroup: cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
+  public readonly listener: cdk.aws_elasticloadbalancingv2.ApplicationListener;
+  public readonly ecrRepository: cdk.aws_ecr.IRepository;
+
   constructor(
     scope: Construct,
     id: string,
@@ -12,7 +18,7 @@ export class ECSStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    // Create ECS Cluster
+    // Create ECS cluster
     const cluster = new cdk.aws_ecs.Cluster(this, "Cluster", {
       clusterName: `${proj}-cluster`,
       vpc: vpcStack.vpc,
@@ -60,7 +66,8 @@ export class ECSStack extends cdk.Stack {
       }
     );
 
-    const ecrRepository = cdk.aws_ecr.Repository.fromRepositoryArn(
+    // Get ECR repository
+    this.ecrRepository = cdk.aws_ecr.Repository.fromRepositoryArn(
       this,
       "ECR",
       process.env.ECR_ARN!
@@ -68,7 +75,7 @@ export class ECSStack extends cdk.Stack {
 
     // Add container to task definition
     taskDefinition.addContainer("Container", {
-      image: cdk.aws_ecs.ContainerImage.fromEcrRepository(ecrRepository),
+      image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
       memoryLimitMiB: 512,
       cpu: 256,
       portMappings: [{ containerPort: 80 }],
@@ -121,12 +128,12 @@ export class ECSStack extends cdk.Stack {
     alb.addSecurityGroup(albSecurityGroup);
 
     // Create listener
-    const listener = alb.addListener("Listener", {
+    this.listener = alb.addListener("Listener", {
       port: 80,
     });
 
     // Create target group for Blue deployment
-    const blueTargetGroup =
+    this.blueTargetGroup =
       new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
         this,
         "BlueTargetGroup",
@@ -143,7 +150,7 @@ export class ECSStack extends cdk.Stack {
       );
 
     // Create target group for Green deployment
-    const greenTargetGroup =
+    this.greenTargetGroup =
       new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
         this,
         "GreenTargetGroup",
@@ -160,8 +167,8 @@ export class ECSStack extends cdk.Stack {
       );
 
     // Add target group to listener
-    listener.addTargetGroups("TargetGroups", {
-      targetGroups: [blueTargetGroup],
+    this.listener.addTargetGroups("TargetGroups", {
+      targetGroups: [this.blueTargetGroup],
     });
 
     // Create a Security Group for the Fargate Service that allows all IPs within the VPC
@@ -180,17 +187,8 @@ export class ECSStack extends cdk.Stack {
       cdk.aws_ec2.Port.allTraffic()
     );
 
-    // Create code deploy
-    const codedeployApp = new cdk.aws_codedeploy.EcsApplication(
-      this,
-      "CodeDeployApplication",
-      {
-        applicationName: `${proj}_CodeDeployApplication`,
-      }
-    );
-
     // Create service
-    const service = new cdk.aws_ecs.FargateService(this, "Service", {
+    this.service = new cdk.aws_ecs.FargateService(this, "Service", {
       cluster: cluster,
       taskDefinition: taskDefinition,
       desiredCount: 1,
@@ -214,60 +212,7 @@ export class ECSStack extends cdk.Stack {
       },
     });
 
-    // create deployment group
-    const deploymentGroup = new cdk.aws_codedeploy.EcsDeploymentGroup(
-      this,
-      "DeploymentGroup",
-      {
-        service: service,
-        application: codedeployApp,
-        deploymentGroupName: `${proj}_DeploymentGroup`,
-        autoRollback: {
-          failedDeployment: true,
-        },
-        blueGreenDeploymentConfig: {
-          blueTargetGroup: blueTargetGroup,
-          greenTargetGroup: greenTargetGroup,
-          listener: listener,
-          terminationWaitTime: cdk.Duration.minutes(60),
-          deploymentApprovalWaitTime: cdk.Duration.minutes(10),
-        },
-      }
-    );
-
-    service.attachToApplicationTargetGroup(blueTargetGroup);
-
-    const sourceOutput = new cdk.aws_codepipeline.Artifact();
-
-    // ECR Source Action (this action monitors ECR for new image pushes)
-    const sourceAction = new cdk.aws_codepipeline_actions.EcrSourceAction({
-      actionName: "ECR_Source",
-      repository: ecrRepository,
-      imageTag: "latest",
-      output: sourceOutput,
-    });
-
-    // ECS Deploy Action (this action deploys the new image to ECS via CodeDeploy)
-    const deployAction =
-      new cdk.aws_codepipeline_actions.CodeDeployEcsDeployAction({
-        actionName: "ECS_Deploy",
-        deploymentGroup,
-        taskDefinitionTemplateInput: sourceOutput,
-        appSpecTemplateInput: sourceOutput,
-      });
-
-    new cdk.aws_codepipeline.Pipeline(this, "EcsPipeline", {
-      pipelineName: `${proj}-Pipeline`,
-      stages: [
-        {
-          stageName: "Source",
-          actions: [sourceAction],
-        },
-        {
-          stageName: "Deploy",
-          actions: [deployAction],
-        },
-      ],
-    });
+    // Attach service to Blue target group
+    this.service.attachToApplicationTargetGroup(this.blueTargetGroup);
   }
 }
