@@ -56,7 +56,6 @@ export class DeployStack extends cdk.Stack {
       output: sourceOutput,
     });
 
-    // CodeBuild Project (this project builds the image)
     const codeBuildProject = new cdk.aws_codebuild.PipelineProject(
       this,
       "CodeBuildProject",
@@ -70,28 +69,48 @@ export class DeployStack extends cdk.Stack {
           phases: {
             build: {
               commands: [
-                "echo Creating appspec.yml",
+                "echo Reading JSON input from ECR output...",
+                "export IMAGE_URI=$(cat $CODEBUILD_SOURCE_REPO_URL/imagedefinitions.json | jq -r '.[0].ImageURI')",
+                "export IMAGE_TAG=$(cat $CODEBUILD_SOURCE_REPO_URL/imagedefinitions.json | jq -r '.[0].ImageTags[0]')",
+                "export IMAGE_DIGEST=$(cat $CODEBUILD_SOURCE_REPO_URL/imagedefinitions.json | jq -r '.[0].ImageDigest')",
+
+                "echo Generating appspec.yml...",
                 'echo "version: 0.0" > appspec.yml',
                 'echo "Resources:" >> appspec.yml',
-                'echo "  myEcsService:" >> appspec.yml',
-                'echo "    Type: AWS::CodeDeploy::ECS::DeploymentGroup" >> appspec.yml',
-                'echo "    Properties:" >> appspec.yml',
-                'echo "      TaskDefinition: $TASK_DEFINITION_ARN" >> appspec.yml',
-                'echo "      LoadBalancerInfo:" >> appspec.yml',
-                'echo "        ContainerName: $CONTAINER_NAME" >> appspec.yml',
-                'echo "        ContainerPort: $CONTAINER_PORT" >> appspec.yml',
+                'echo "  - myEcsService:" >> appspec.yml',
+                'echo "      Type: AWS::ECS::Service" >> appspec.yml',
+                'echo "      Properties:" >> appspec.yml',
+                'echo "        TaskDefinition: $TASK_DEFINITION_ARN" >> appspec.yml',
+                'echo "        LoadBalancerInfo:" >> appspec.yml',
+                'echo "          ContainerName: nginx" >> appspec.yml',
+                'echo "          ContainerPort: 80" >> appspec.yml',
+
+                "echo Generating taskdef.json...",
+                'echo "[" > taskdef.json',
+                'echo "  {" >> taskdef.json',
+                'echo "    \\"family\\": \\"nginx-task\\"," >> taskdef.json',
+                'echo "    \\"containerDefinitions\\": [" >> taskdef.json',
+                'echo "      {" >> taskdef.json',
+                'echo "        \\"name\\": \\"nginx"," >> taskdef.json',
+                'echo "        \\"image\\": \\"$IMAGE_URI:$IMAGE_TAG"," >> taskdef.json',
+                'echo "        \\"memory\\": 512," >> taskdef.json',
+                'echo "        \\"cpu\\": 256," >> taskdef.json',
+                'echo "        \\"essential\\": true," >> taskdef.json',
+                'echo "        \\"portMappings\\": [" >> taskdef.json',
+                'echo "          {" >> taskdef.json',
+                'echo "            \\"containerPort\\": 80," >> taskdef.json',
+                'echo "            \\"protocol\\": \\"tcp\\"" >> taskdef.json',
+                'echo "          }" >> taskdef.json',
+                'echo "        ]" >> taskdef.json',
+                'echo "      }" >> taskdef.json',
+                'echo "    ]" >> taskdef.json',
+                'echo "  }" >> taskdef.json',
+                'echo "]" >> taskdef.json',
               ],
             },
           },
           artifacts: {
-            files: ["appspec.yml", "**/*"],
-          },
-          environment: {
-            variables: {
-              TASK_DEFINITION_ARN: ecsStack.taskDefinition.taskDefinitionArn,
-              CONTAINER_NAME: "web",
-              CONTAINER_PORT: "80",
-            },
+            files: ["appspec.yml", "taskdef.json"],
           },
         }),
       }

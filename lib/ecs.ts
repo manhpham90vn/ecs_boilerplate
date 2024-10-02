@@ -77,6 +77,14 @@ export class ECSStack extends cdk.Stack {
       environment: {
         PORT: "80",
       },
+      logging: cdk.aws_ecs.LogDrivers.awsLogs({
+        streamPrefix: `${proj}-logs`,
+        logGroup: new cdk.aws_logs.LogGroup(this, "LogGroup", {
+          logGroupName: `/ecs/${proj}-logs`,
+          retention: cdk.aws_logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+      }),
     });
 
     // Create ALB
