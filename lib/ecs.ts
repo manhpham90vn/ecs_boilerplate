@@ -9,6 +9,8 @@ export class ECSStack extends cdk.Stack {
   public readonly listener: cdk.aws_elasticloadbalancingv2.ApplicationListener;
   public readonly ecrRepository: cdk.aws_ecr.IRepository;
   public readonly taskDefinition: cdk.aws_ecs.FargateTaskDefinition;
+  public readonly taskRole: cdk.aws_iam.Role;
+  public readonly executionRole: cdk.aws_iam.Role;
 
   constructor(
     scope: Construct,
@@ -26,26 +28,26 @@ export class ECSStack extends cdk.Stack {
     });
 
     // Create execution role for Fargate
-    const executionRole = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
+    this.executionRole = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
     // Add managed policies to execution role
-    executionRole.addManagedPolicy(
+    this.executionRole.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "service-role/AmazonECSTaskExecutionRolePolicy"
       )
     );
 
     // Add managed policies to execution role
-    executionRole.addManagedPolicy(
+    this.executionRole.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "CloudWatchLogsFullAccess"
       )
     );
 
     // Create task role for Fargate
-    const taskRole = new cdk.aws_iam.Role(this, "FargateTaskRole", {
+    this.taskRole = new cdk.aws_iam.Role(this, "FargateTaskRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
@@ -54,10 +56,11 @@ export class ECSStack extends cdk.Stack {
       this,
       "TaskDefinition",
       {
+        family: `${proj}-task`,
         cpu: 256,
         memoryLimitMiB: 512,
-        executionRole: executionRole,
-        taskRole: taskRole,
+        executionRole: this.executionRole,
+        taskRole: this.taskRole,
       }
     );
 
@@ -71,6 +74,7 @@ export class ECSStack extends cdk.Stack {
     // Add container to task definition
     this.taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
+      containerName: `${proj}-container`,
       memoryLimitMiB: 512,
       cpu: 256,
       portMappings: [{ containerPort: 80 }],
