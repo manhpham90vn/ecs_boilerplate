@@ -5,35 +5,51 @@ import { ECSStack } from "./ecs";
 import { DeployStack } from "./deploy";
 
 export class EcsBoilerplateStack extends cdk.Stack {
+  private proj: string;
+  public account: string;
+  public region: string;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Get project name, account, and region
-    const proj = process.env.PROJECT_NAME || "ecs-boilerplate";
-    const account = process.env.CDK_DEFAULT_ACCOUNT;
-    const region = process.env.CDK_DEFAULT_REGION;
+    this.setProjectInfo();
 
-    // Create VPC stack
-    const vpcStack = new VPCStack(this, "VPCStack", proj, {
+    const vpcStack = this.createVPCStack();
+
+    const ecsStack = this.createECSStack(vpcStack);
+
+    this.createDeployStack(ecsStack);
+  }
+
+  private setProjectInfo() {
+    this.proj = process.env.PROJECT_NAME || "ecs-boilerplate";
+    this.account = process.env.CDK_DEFAULT_ACCOUNT || "123456789012";
+    this.region = process.env.CDK_DEFAULT_REGION || "ap-southeast-1";
+  }
+
+  private createVPCStack(): VPCStack {
+    return new VPCStack(this, "VPCStack", this.proj, {
       env: {
-        account: account,
-        region: region,
+        account: this.account,
+        region: this.region,
       },
     });
+  }
 
-    // Create ECS stack
-    const ecsStack = new ECSStack(this, "ECSStack", vpcStack, proj, {
+  private createECSStack(vpcStack: VPCStack): ECSStack {
+    return new ECSStack(this, "ECSStack", vpcStack, this.proj, {
       env: {
-        account: account,
-        region: region,
+        account: this.account,
+        region: this.region,
       },
     });
+  }
 
-    // Create Deploy stack
-    new DeployStack(this, "DeployStack", ecsStack, proj, {
+  private createDeployStack(ecsStack: ECSStack) {
+    new DeployStack(this, "DeployStack", ecsStack, this.proj, {
       env: {
-        account: account,
-        region: region,
+        account: this.account,
+        region: this.region,
       },
     });
   }

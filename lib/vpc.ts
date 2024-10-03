@@ -12,8 +12,52 @@ export class VPCStack extends cdk.Stack {
   public readonly publicSubnets: cdk.aws_ec2.CfnSubnet[];
   public readonly publicRouteTable: cdk.aws_ec2.CfnRouteTable;
 
-  createVPC(scope: Construct, proj: string): cdk.aws_ec2.Vpc {
-    return new cdk.aws_ec2.Vpc(scope, "VPC", {
+  constructor(
+    scope: Construct,
+    id: string,
+    proj: string,
+    props?: cdk.StackProps
+  ) {
+    super(scope, id, props);
+
+    this.vpc = this.createVPC(proj);
+    const availabilityZones = this.vpc.availabilityZones;
+
+    this.publicSubnets = this.createSubnets(
+      proj,
+      this.vpc,
+      "Public",
+      0,
+      availabilityZones
+    );
+    this.privateSubnets = this.createSubnets(
+      proj,
+      this.vpc,
+      "Private",
+      48,
+      availabilityZones
+    );
+
+    const igw = this.createInternetGateway(proj);
+    this.publicRouteTable = this.createRouteTable(
+      proj,
+      "Public",
+      this.publicSubnets
+    );
+    const privateRouteTable = this.createRouteTable(
+      proj,
+      "Private",
+      this.privateSubnets
+    );
+
+    this.createPublicRoutes(igw);
+    this.createVPCEndpoints(privateRouteTable);
+
+    new cdk.CfnOutput(this, "VPCID", { value: this.vpc.vpcId });
+  }
+
+  private createVPC(proj: string): cdk.aws_ec2.Vpc {
+    return new cdk.aws_ec2.Vpc(this, "VPC", {
       vpcName: `${proj}-VPC`,
       ipAddresses: cdk.aws_ec2.IpAddresses.cidr("10.0.0.0/16"),
       enableDnsHostnames: true,
@@ -24,72 +68,56 @@ export class VPCStack extends cdk.Stack {
     });
   }
 
-  createSubnet(
-    scope: Construct,
+  private createSubnets(
     proj: string,
     vpc: cdk.aws_ec2.Vpc,
     type: "Public" | "Private",
     offset: number,
     availabilityZones: string[]
   ): cdk.aws_ec2.CfnSubnet[] {
-    const subnets: cdk.aws_ec2.CfnSubnet[] = [];
-    for (let i = 0; i < availabilityZones.length; i++) {
-      const id = `${type}-Subnet-${i + 1}`;
-      const cidrBlock = `10.0.${16 * i + offset}.0/20`;
-      const availabilityZone = availabilityZones[i];
-      const subnet = new cdk.aws_ec2.CfnSubnet(scope, id, {
+    return availabilityZones.map((zone, index) => {
+      const id = `${type}-Subnet-${index + 1}`;
+      return new cdk.aws_ec2.CfnSubnet(this, id, {
         vpcId: vpc.vpcId,
-        cidrBlock: cidrBlock,
-        availabilityZone: availabilityZone,
-        mapPublicIpOnLaunch: true,
+        cidrBlock: `10.0.${16 * index + offset}.0/20`,
+        availabilityZone: zone,
+        mapPublicIpOnLaunch: type === "Public",
         tags: [
           { key: "Name", value: `${proj}_${id}` },
           { key: "aws-cdk:subnet-type", value: type },
         ],
       });
-      subnets.push(subnet);
-    }
-    return subnets;
+    });
   }
 
-  createInternetGateway(
-    scope: Construct,
-    proj: string,
-    vpc: cdk.aws_ec2.Vpc
-  ): cdk.aws_ec2.CfnInternetGateway {
-    const igw = new cdk.aws_ec2.CfnInternetGateway(scope, "InternetGateway", {
+  private createInternetGateway(proj: string): cdk.aws_ec2.CfnInternetGateway {
+    const igw = new cdk.aws_ec2.CfnInternetGateway(this, "InternetGateway", {
       tags: [{ key: "Name", value: `${proj}-InternetGateway` }],
     });
-
-    // Attach Internet Gateway to VPC
-    new cdk.aws_ec2.CfnVPCGatewayAttachment(scope, "VPCGatewayAttachment", {
-      vpcId: vpc.vpcId,
+    new cdk.aws_ec2.CfnVPCGatewayAttachment(this, "VPCGatewayAttachment", {
+      vpcId: this.vpc.vpcId,
       internetGatewayId: igw.ref,
     });
-
     return igw;
   }
 
-  createRouteTable(
-    scope: Construct,
+  private createRouteTable(
     proj: string,
-    vpc: cdk.aws_ec2.Vpc,
     type: "Public" | "Private",
     subnets: cdk.aws_ec2.CfnSubnet[]
   ): cdk.aws_ec2.CfnRouteTable {
     const routeTable = new cdk.aws_ec2.CfnRouteTable(
-      scope,
+      this,
       `${proj}-${type}RouteTable`,
       {
-        vpcId: vpc.vpcId,
+        vpcId: this.vpc.vpcId,
         tags: [{ key: "Name", value: `${proj}-${type}RouteTable` }],
       }
     );
 
-    // Associate subnets with route table
     subnets.forEach((subnet, index) => {
       new cdk.aws_ec2.CfnSubnetRouteTableAssociation(
-        scope,
+        this,
         `${type}SubnetAssociation-${index}`,
         {
           subnetId: subnet.ref,
@@ -97,106 +125,29 @@ export class VPCStack extends cdk.Stack {
         }
       );
     });
-
     return routeTable;
   }
 
-  createInterfaceEndpoint(
-    scope: Construct,
-    vpc: cdk.aws_ec2.Vpc,
-    endpoint: EndpointConfig,
-    securityGroup: cdk.aws_ec2.SecurityGroup,
-    subnetIds: string[]
-  ): cdk.aws_ec2.CfnVPCEndpoint {
-    return new cdk.aws_ec2.CfnVPCEndpoint(scope, `${endpoint.id}Endpoint`, {
-      serviceName: endpoint.serviceName,
-      vpcId: vpc.vpcId,
-      privateDnsEnabled: true,
-      vpcEndpointType: "Interface",
-      subnetIds: subnetIds,
-      securityGroupIds: [securityGroup.securityGroupId],
-    });
-  }
-
-  constructor(
-    scope: Construct,
-    id: string,
-    proj: string,
-    props?: cdk.StackProps
-  ) {
-    super(scope, id, props);
-
-    // Create VPC
-    this.vpc = this.createVPC(this, proj);
-
-    // Get availability zones
-    const availabilityZones = this.vpc.availabilityZones;
-
-    // Create public subnets
-    this.publicSubnets = this.createSubnet(
-      this,
-      proj,
-      this.vpc,
-      "Public",
-      0,
-      availabilityZones
-    );
-
-    // Create private subnets
-    this.privateSubnets = this.createSubnet(
-      this,
-      proj,
-      this.vpc,
-      "Private",
-      48,
-      availabilityZones
-    );
-
-    // Create Internet Gateway
-    const igw = this.createInternetGateway(this, proj, this.vpc);
-
-    // Create route table for public subnets
-    this.publicRouteTable = this.createRouteTable(
-      this,
-      proj,
-      this.vpc,
-      "Public",
-      this.publicSubnets
-    );
-
-    // Create route for public subnets
+  private createPublicRoutes(igw: cdk.aws_ec2.CfnInternetGateway): void {
     new cdk.aws_ec2.CfnRoute(this, "DefaultRoute", {
       routeTableId: this.publicRouteTable.ref,
       destinationCidrBlock: "0.0.0.0/0",
       gatewayId: igw.ref,
     });
+  }
 
-    // Create route table for private subnets
-    const privateRouteTable = this.createRouteTable(
-      this,
-      proj,
-      this.vpc,
-      "Private",
-      this.privateSubnets
-    );
-
-    // Create security group for VPC endpoint
-    const vpcEndpointSecurityGroup = new cdk.aws_ec2.SecurityGroup(
-      this,
-      "VPCEndpointSG",
-      {
-        vpc: this.vpc,
-        allowAllOutbound: true,
-      }
-    );
-
-    // Allow all inbound traffic
-    vpcEndpointSecurityGroup.addIngressRule(
+  private createVPCEndpoints(
+    privateRouteTable: cdk.aws_ec2.CfnRouteTable
+  ): void {
+    const vpcEndpointSG = new cdk.aws_ec2.SecurityGroup(this, "VPCEndpointSG", {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+    vpcEndpointSG.addIngressRule(
       cdk.aws_ec2.Peer.anyIpv4(),
       cdk.aws_ec2.Port.allTraffic()
     );
 
-    // Create PrivateLink endpoint for S3
     new cdk.aws_ec2.CfnVPCEndpoint(this, "S3Endpoint", {
       serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.s3`,
       vpcId: this.vpc.vpcId,
@@ -204,7 +155,7 @@ export class VPCStack extends cdk.Stack {
       routeTableIds: [privateRouteTable.ref],
     });
 
-    const endpoints = [
+    const endpoints: EndpointConfig[] = [
       {
         id: "ECREndpoint",
         serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.ecr.dkr`,
@@ -219,20 +170,15 @@ export class VPCStack extends cdk.Stack {
       },
     ];
 
-    // Create PrivateLink endpoints
     endpoints.forEach((endpoint) => {
-      this.createInterfaceEndpoint(
-        this,
-        this.vpc,
-        endpoint,
-        vpcEndpointSecurityGroup,
-        this.privateSubnets.map((subnet) => subnet.ref)
-      );
-    });
-
-    // Output VPC ID
-    new cdk.CfnOutput(this, "VPCID", {
-      value: this.vpc.vpcId,
+      new cdk.aws_ec2.CfnVPCEndpoint(this, `${endpoint.id}Endpoint`, {
+        serviceName: endpoint.serviceName,
+        vpcId: this.vpc.vpcId,
+        privateDnsEnabled: true,
+        vpcEndpointType: "Interface",
+        subnetIds: this.privateSubnets.map((subnet) => subnet.ref),
+        securityGroupIds: [vpcEndpointSG.securityGroupId],
+      });
     });
   }
 }

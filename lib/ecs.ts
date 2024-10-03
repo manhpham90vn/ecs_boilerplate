@@ -21,57 +21,90 @@ export class ECSStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    // Create ECS cluster
-    const cluster = new cdk.aws_ecs.Cluster(this, "Cluster", {
+    const cluster = this.createCluster(vpcStack, proj);
+
+    this.executionRole = this.createExecutionRole();
+    this.taskRole = this.createTaskRole();
+    this.taskDefinition = this.createTaskDefinition(proj);
+
+    this.ecrRepository = this.getEcrRepository();
+
+    this.addContainerToTaskDefinition(proj);
+
+    const alb = this.createAlb(vpcStack, proj);
+    const albSecurityGroup = this.createAlbSecurityGroup(vpcStack);
+
+    alb.addSecurityGroup(albSecurityGroup);
+
+    this.listener = this.createListener(alb);
+    this.blueTargetGroup = this.createTargetGroup(vpcStack, "Blue");
+    this.greenTargetGroup = this.createTargetGroup(vpcStack, "Green");
+
+    this.listener.addTargetGroups("TargetGroups", {
+      targetGroups: [this.blueTargetGroup],
+    });
+
+    this.service = this.createFargateService(cluster, vpcStack, proj);
+    this.attachServiceToTargetGroup(this.blueTargetGroup);
+    this.enableAutoScaling();
+
+    new cdk.CfnOutput(this, "ALBDNS", {
+      value: alb.loadBalancerDnsName,
+    });
+  }
+
+  private createCluster(vpcStack: VPCStack, proj: string): cdk.aws_ecs.Cluster {
+    return new cdk.aws_ecs.Cluster(this, "Cluster", {
       clusterName: `${proj}-cluster`,
       vpc: vpcStack.vpc,
     });
+  }
 
-    // Create execution role for Fargate
-    this.executionRole = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
+  private createExecutionRole(): cdk.aws_iam.Role {
+    const role = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
-    // Add managed policies to execution role
-    this.executionRole.addManagedPolicy(
+    role.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "service-role/AmazonECSTaskExecutionRolePolicy"
       )
     );
-
-    // Add managed policies to execution role
-    this.executionRole.addManagedPolicy(
+    role.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "CloudWatchLogsFullAccess"
       )
     );
+    return role;
+  }
 
-    // Create task role for Fargate
-    this.taskRole = new cdk.aws_iam.Role(this, "FargateTaskRole", {
+  private createTaskRole(): cdk.aws_iam.Role {
+    return new cdk.aws_iam.Role(this, "FargateTaskRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
+  }
 
-    // Create task definition
-    this.taskDefinition = new cdk.aws_ecs.FargateTaskDefinition(
-      this,
-      "TaskDefinition",
-      {
-        family: `${proj}-task`,
-        cpu: 256,
-        memoryLimitMiB: 512,
-        executionRole: this.executionRole,
-        taskRole: this.taskRole,
-      }
-    );
+  private createTaskDefinition(
+    proj: string
+  ): cdk.aws_ecs.FargateTaskDefinition {
+    return new cdk.aws_ecs.FargateTaskDefinition(this, "TaskDefinition", {
+      family: `${proj}-task`,
+      cpu: 256,
+      memoryLimitMiB: 512,
+      executionRole: this.executionRole,
+      taskRole: this.taskRole,
+    });
+  }
 
-    // Get ECR repository
-    this.ecrRepository = cdk.aws_ecr.Repository.fromRepositoryArn(
+  private getEcrRepository(): cdk.aws_ecr.IRepository {
+    return cdk.aws_ecr.Repository.fromRepositoryArn(
       this,
       "ECR",
       process.env.ECR_ARN!
     );
+  }
 
-    // Add container to task definition
+  private addContainerToTaskDefinition(proj: string): void {
     this.taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
       containerName: `${proj}-container`,
@@ -90,9 +123,13 @@ export class ECSStack extends cdk.Stack {
         }),
       }),
     });
+  }
 
-    // Create ALB
-    const alb = new cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer(
+  private createAlb(
+    vpcStack: VPCStack,
+    proj: string
+  ): cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer {
+    return new cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer(
       this,
       "ALB",
       {
@@ -114,9 +151,12 @@ export class ECSStack extends cdk.Stack {
         },
       }
     );
+  }
 
-    // Create security group for ALB
-    const albSecurityGroup = new cdk.aws_ec2.SecurityGroup(
+  private createAlbSecurityGroup(
+    vpcStack: VPCStack
+  ): cdk.aws_ec2.SecurityGroup {
+    const securityGroup = new cdk.aws_ec2.SecurityGroup(
       this,
       "ALBSecurityGroup",
       {
@@ -124,78 +164,47 @@ export class ECSStack extends cdk.Stack {
         allowAllOutbound: true,
       }
     );
-
-    // Allow all inbound traffic on port 80
-    albSecurityGroup.addIngressRule(
+    securityGroup.addIngressRule(
       cdk.aws_ec2.Peer.anyIpv4(),
       cdk.aws_ec2.Port.tcp(80)
     );
+    return securityGroup;
+  }
 
-    // Add security group to ALB
-    alb.addSecurityGroup(albSecurityGroup);
+  private createListener(
+    alb: cdk.aws_elasticloadbalancingv2.ApplicationLoadBalancer
+  ): cdk.aws_elasticloadbalancingv2.ApplicationListener {
+    return alb.addListener("Listener", { port: 80 });
+  }
 
-    // Create listener
-    this.listener = alb.addListener("Listener", {
-      port: 80,
-    });
-
-    // Create target group for Blue deployment
-    this.blueTargetGroup =
-      new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
-        this,
-        "BlueTargetGroup",
-        {
-          vpc: vpcStack.vpc,
-          protocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
-          port: 80,
-          targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
-          healthCheck: {
-            path: "/",
-            interval: cdk.Duration.seconds(30),
-          },
-        }
-      );
-
-    // Create target group for Green deployment
-    this.greenTargetGroup =
-      new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
-        this,
-        "GreenTargetGroup",
-        {
-          vpc: vpcStack.vpc,
-          protocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
-          port: 80,
-          targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
-          healthCheck: {
-            path: "/",
-            interval: cdk.Duration.seconds(30),
-          },
-        }
-      );
-
-    // Add target group to listener
-    this.listener.addTargetGroups("TargetGroups", {
-      targetGroups: [this.blueTargetGroup],
-    });
-
-    // Create a Security Group for the Fargate Service that allows all IPs within the VPC
-    const serviceSecurityGroup = new cdk.aws_ec2.SecurityGroup(
+  private createTargetGroup(
+    vpcStack: VPCStack,
+    color: string
+  ): cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup {
+    return new cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup(
       this,
-      "ServiceSecurityGroup",
+      `${color}TargetGroup`,
       {
         vpc: vpcStack.vpc,
-        allowAllOutbound: true,
+        protocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
+        port: 80,
+        targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
+        healthCheck: {
+          path: "/",
+          interval: cdk.Duration.seconds(30),
+        },
       }
     );
+  }
 
-    // Allow all inbound traffic from within the VPC
-    serviceSecurityGroup.addIngressRule(
-      cdk.aws_ec2.Peer.ipv4(vpcStack.vpc.vpcCidrBlock),
-      cdk.aws_ec2.Port.allTraffic()
-    );
+  private createFargateService(
+    cluster: cdk.aws_ecs.Cluster,
+    vpcStack: VPCStack,
+    proj: string
+  ): cdk.aws_ecs.FargateService {
+    const serviceSecurityGroup = this.createServiceSecurityGroup(vpcStack);
 
-    // Create service
-    this.service = new cdk.aws_ecs.FargateService(this, "Service", {
+    return new cdk.aws_ecs.FargateService(this, "Service", {
       cluster: cluster,
       taskDefinition: this.taskDefinition,
       desiredCount: 1,
@@ -218,29 +227,44 @@ export class ECSStack extends cdk.Stack {
         ),
       },
     });
+  }
 
-    // Attach service to Blue target group
-    this.service.attachToApplicationTargetGroup(this.blueTargetGroup);
+  private createServiceSecurityGroup(
+    vpcStack: VPCStack
+  ): cdk.aws_ec2.SecurityGroup {
+    const serviceSecurityGroup = new cdk.aws_ec2.SecurityGroup(
+      this,
+      "ServiceSecurityGroup",
+      {
+        vpc: vpcStack.vpc,
+        allowAllOutbound: true,
+      }
+    );
+    serviceSecurityGroup.addIngressRule(
+      cdk.aws_ec2.Peer.ipv4(vpcStack.vpc.vpcCidrBlock),
+      cdk.aws_ec2.Port.allTraffic()
+    );
+    return serviceSecurityGroup;
+  }
 
-    // Enable Auto Scaling for the Fargate service
+  private attachServiceToTargetGroup(
+    targetGroup: cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup
+  ): void {
+    this.service.attachToApplicationTargetGroup(targetGroup);
+  }
+
+  private enableAutoScaling(): void {
     const scalableTarget = this.service.autoScaleTaskCount({
       minCapacity: 1,
       maxCapacity: 4,
     });
 
-    // Configure scaling policy based on CPU utilization
     scalableTarget.scaleOnCpuUtilization("CpuScaling", {
       targetUtilizationPercent: 50,
     });
 
-    // Optionally, you can add scaling based on memory utilization as well
     scalableTarget.scaleOnMemoryUtilization("MemoryScaling", {
       targetUtilizationPercent: 70,
-    });
-
-    // Output the DNS name of the ALB
-    new cdk.CfnOutput(this, "ALBDNS", {
-      value: alb.loadBalancerDnsName,
     });
   }
 }
