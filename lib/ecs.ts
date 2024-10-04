@@ -8,9 +8,6 @@ export class ECSStack extends cdk.Stack {
   public readonly greenTargetGroup: cdk.aws_elasticloadbalancingv2.ApplicationTargetGroup;
   public readonly listener: cdk.aws_elasticloadbalancingv2.ApplicationListener;
   public readonly ecrRepository: cdk.aws_ecr.IRepository;
-  public readonly taskDefinition: cdk.aws_ecs.FargateTaskDefinition;
-  public readonly taskRole: cdk.aws_iam.Role;
-  public readonly executionRole: cdk.aws_iam.Role;
 
   constructor(
     scope: Construct,
@@ -23,13 +20,17 @@ export class ECSStack extends cdk.Stack {
 
     const cluster = this.createCluster(vpcStack, proj);
 
-    this.executionRole = this.createExecutionRole();
-    this.taskRole = this.createTaskRole();
-    this.taskDefinition = this.createTaskDefinition(proj);
+    const executionRole = this.createExecutionRole();
+    const taskRole = this.createTaskRole();
+    const taskDefinition = this.createTaskDefinition(
+      proj,
+      executionRole,
+      taskRole
+    );
 
     this.ecrRepository = this.getEcrRepository();
 
-    this.addContainerToTaskDefinition(proj);
+    this.addContainerToTaskDefinition(proj, taskDefinition);
 
     const alb = this.createAlb(vpcStack, proj);
     const albSecurityGroup = this.createAlbSecurityGroup(vpcStack);
@@ -44,7 +45,12 @@ export class ECSStack extends cdk.Stack {
       targetGroups: [this.blueTargetGroup],
     });
 
-    this.service = this.createFargateService(cluster, vpcStack, proj);
+    this.service = this.createFargateService(
+      cluster,
+      vpcStack,
+      proj,
+      taskDefinition
+    );
     this.attachServiceToTargetGroup(this.blueTargetGroup);
     this.enableAutoScaling();
 
@@ -85,14 +91,16 @@ export class ECSStack extends cdk.Stack {
   }
 
   private createTaskDefinition(
-    proj: string
+    proj: string,
+    executionRole: cdk.aws_iam.Role,
+    taskRole: cdk.aws_iam.Role
   ): cdk.aws_ecs.FargateTaskDefinition {
     return new cdk.aws_ecs.FargateTaskDefinition(this, "TaskDefinition", {
       family: `${proj}-task`,
       cpu: 512,
       memoryLimitMiB: 1024,
-      executionRole: this.executionRole,
-      taskRole: this.taskRole,
+      executionRole: executionRole,
+      taskRole: taskRole,
     });
   }
 
@@ -104,8 +112,11 @@ export class ECSStack extends cdk.Stack {
     );
   }
 
-  private addContainerToTaskDefinition(proj: string): void {
-    this.taskDefinition.addContainer("Container", {
+  private addContainerToTaskDefinition(
+    proj: string,
+    taskDefinition: cdk.aws_ecs.FargateTaskDefinition
+  ): void {
+    taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
       containerName: `${proj}-container`,
       memoryLimitMiB: 512,
@@ -200,13 +211,14 @@ export class ECSStack extends cdk.Stack {
   private createFargateService(
     cluster: cdk.aws_ecs.Cluster,
     vpcStack: VPCStack,
-    proj: string
+    proj: string,
+    taskDefinition: cdk.aws_ecs.FargateTaskDefinition
   ): cdk.aws_ecs.FargateService {
     const serviceSecurityGroup = this.createServiceSecurityGroup(vpcStack);
 
     return new cdk.aws_ecs.FargateService(this, "Service", {
       cluster: cluster,
-      taskDefinition: this.taskDefinition,
+      taskDefinition: taskDefinition,
       desiredCount: 1,
       serviceName: `${proj}_Service`,
       deploymentController: {

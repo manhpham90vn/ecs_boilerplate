@@ -97,7 +97,7 @@ export class DeployStack extends cdk.Stack {
     sourceOutput: cdk.aws_codepipeline.Artifact,
     buildOutput: cdk.aws_codepipeline.Artifact
   ): cdk.aws_codepipeline_actions.CodeBuildAction {
-    const codeBuildProject = this.createCodeBuildProject(ecsStack, proj);
+    const codeBuildProject = this.createCodeBuildProject(proj);
     return new cdk.aws_codepipeline_actions.CodeBuildAction({
       actionName: "Build",
       project: codeBuildProject,
@@ -107,7 +107,6 @@ export class DeployStack extends cdk.Stack {
   }
 
   private createCodeBuildProject(
-    ecsStack: ECSStack,
     proj: string
   ): cdk.aws_codebuild.PipelineProject {
     const project = new cdk.aws_codebuild.PipelineProject(
