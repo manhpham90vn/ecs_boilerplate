@@ -110,78 +110,73 @@ export class DeployStack extends cdk.Stack {
     ecsStack: ECSStack,
     proj: string
   ): cdk.aws_codebuild.PipelineProject {
-    return new cdk.aws_codebuild.PipelineProject(this, "CodeBuildProject", {
-      projectName: `${proj}_BuildProject`,
-      environment: {
-        buildImage: cdk.aws_codebuild.LinuxBuildImage.STANDARD_5_0,
-        computeType: cdk.aws_codebuild.ComputeType.SMALL,
-        environmentVariables: {
-          TASK_FAMILY: {
-            value: `${proj}-task`,
-          },
-          CONTAINER_NAME: {
-            value: `${proj}-container`,
-          },
-          CONTAINER_PORT: {
-            value: "80",
-          },
-          HOST_PORT: {
-            value: "80",
-          },
-          TASK_ROLE_ARN: {
-            value: ecsStack.taskRole.roleArn,
-          },
-          EXECUTION_ROLE_ARN: {
-            value: ecsStack.executionRole.roleArn,
+    const project = new cdk.aws_codebuild.PipelineProject(
+      this,
+      "CodeBuildProject",
+      {
+        projectName: `${proj}_BuildProject`,
+        environment: {
+          buildImage: cdk.aws_codebuild.LinuxBuildImage.STANDARD_5_0,
+          computeType: cdk.aws_codebuild.ComputeType.SMALL,
+          environmentVariables: {
+            TASK_DEFINITION: {
+              value: `${proj}-task`,
+            },
+            CONTAINER_NAME: {
+              value: `${proj}-container`,
+            },
+            CONTAINER_PORT: {
+              value: "80",
+            },
           },
         },
-      },
-      buildSpec: cdk.aws_codebuild.BuildSpec.fromObject({
-        version: "0.2",
-        phases: {
-          build: {
-            commands: [
-              "IMAGE_URL=$(jq -r '.ImageURI' imageDetail.json)",
-              'echo "{" > taskdef.json',
-              'echo "  "family": "$TASK_FAMILY"," >> taskdef.json',
-              'echo "  "networkMode": "awsvpc"," >> taskdef.json',
-              'echo "  "executionRoleArn": "$EXECUTION_ROLE_ARN"," >> taskdef.json',
-              'echo "  "taskRoleArn": "$TASK_ROLE_ARN"," >> taskdef.json',
-              'echo "  "containerDefinitions": [" >> taskdef.json',
-              'echo "    {" >> taskdef.json',
-              'echo "      "name": "$CONTAINER_NAME"," >> taskdef.json',
-              'echo "      "image": "$IMAGE_URL"," >> taskdef.json',
-              'echo "      "memory": 512," >> taskdef.json',
-              'echo "      "cpu": 256," >> taskdef.json',
-              'echo "      "essential": true," >> taskdef.json',
-              'echo "      "portMappings": [" >> taskdef.json',
-              'echo "        {" >> taskdef.json',
-              'echo "          "containerPort": $CONTAINER_PORT," >> taskdef.json',
-              'echo "          "hostPort": $HOST_PORT" >> taskdef.json',
-              'echo "        }" >> taskdef.json',
-              'echo "      ]" >> taskdef.json',
-              'echo "    }" >> taskdef.json',
-              'echo "  ]" >> taskdef.json',
-              'echo "}" >> taskdef.json',
-              'echo "version: 0.0" > appspec.yaml',
-              'echo "Resources:" >> appspec.yaml',
-              'echo "  - TargetService:" >> appspec.yaml',
-              'echo "      Type: AWS::ECS::Service" >> appspec.yaml',
-              'echo "      Properties:" >> appspec.yaml',
-              'echo "        TaskDefinition: <TASK_DEFINITION>" >> appspec.yaml',
-              'echo "        LoadBalancerInfo:" >> appspec.yaml',
-              'echo "          ContainerName: "$CONTAINER_NAME"" >> appspec.yaml',
-              'echo "          ContainerPort: $CONTAINER_PORT" >> appspec.yaml',
-              "cat taskdef.json",
-              "cat appspec.yaml",
-            ],
+        buildSpec: cdk.aws_codebuild.BuildSpec.fromObject({
+          version: "0.2",
+          phases: {
+            build: {
+              commands: [
+                `echo "const fs = require('fs');" > updateTaskDef.js`,
+                `echo "let taskDef = JSON.parse(fs.readFileSync('taskdef.json', 'utf8'));" >> updateTaskDef.js`,
+                `echo "taskDef = taskDef.taskDefinition;" >> updateTaskDef.js`,
+                `echo "fs.writeFileSync('taskdef.json', JSON.stringify(taskDef, null, 2));" >> updateTaskDef.js`,
+                "aws ecs describe-task-definition --task-definition $TASK_DEFINITION --output json > taskdef.json",
+                "node updateTaskDef.js",
+                'echo "version: 0.0" > appspec.yaml',
+                'echo "Resources:" >> appspec.yaml',
+                'echo "  - TargetService:" >> appspec.yaml',
+                'echo "      Type: AWS::ECS::Service" >> appspec.yaml',
+                'echo "      Properties:" >> appspec.yaml',
+                'echo "        TaskDefinition: <TASK_DEFINITION>" >> appspec.yaml',
+                'echo "        LoadBalancerInfo:" >> appspec.yaml',
+                'echo "          ContainerName: \\"$CONTAINER_NAME\\"" >> appspec.yaml',
+                'echo "          ContainerPort: $CONTAINER_PORT" >> appspec.yaml',
+                "cat taskdef.json",
+                "cat appspec.yaml",
+              ],
+            },
+          },
+          artifacts: {
+            files: ["taskdef.json", "appspec.yaml"],
+          },
+        }),
+        logging: {
+          cloudWatch: {
+            logGroup: new cdk.aws_logs.LogGroup(this, "CodeBuildLogGroup", {
+              logGroupName: `${proj}-CodeBuildLogGroup`,
+              removalPolicy: cdk.RemovalPolicy.DESTROY,
+            }),
           },
         },
-        artifacts: {
-          files: ["taskdef.json", "appspec.yaml"],
-        },
-      }),
-    });
+      }
+    );
+
+    project.addToRolePolicy(
+      new cdk.aws_iam.PolicyStatement({
+        actions: ["ecs:DescribeTaskDefinition"],
+        resources: ["*"],
+      })
+    );
+    return project;
   }
 
   private createManualApprovalAction(): cdk.aws_codepipeline_actions.ManualApprovalAction {
@@ -230,6 +225,7 @@ export class DeployStack extends cdk.Stack {
           actions: [deployAction],
         },
       ],
+      restartExecutionOnUpdate: true,
     });
   }
 }

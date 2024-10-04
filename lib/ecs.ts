@@ -89,8 +89,8 @@ export class ECSStack extends cdk.Stack {
   ): cdk.aws_ecs.FargateTaskDefinition {
     return new cdk.aws_ecs.FargateTaskDefinition(this, "TaskDefinition", {
       family: `${proj}-task`,
-      cpu: 256,
-      memoryLimitMiB: 512,
+      cpu: 512,
+      memoryLimitMiB: 1024,
       executionRole: this.executionRole,
       taskRole: this.taskRole,
     });
