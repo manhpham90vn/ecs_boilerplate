@@ -60,6 +60,7 @@ export class DatabaseStack extends cdk.Stack {
         cdk.aws_ec2.InstanceClass.T3,
         cdk.aws_ec2.InstanceSize.MICRO
       ),
+      databaseName: "testdb",
       vpcSubnets: {
         subnets: vpcStack.privateSubnets.map((subnet) =>
           cdk.aws_ec2.Subnet.fromSubnetAttributes(
@@ -92,7 +93,6 @@ export class DatabaseStack extends cdk.Stack {
       publiclyAccessible: false,
       multiAz: false,
       vpc: vpcStack.vpc,
-      databaseName: proj,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
   }
