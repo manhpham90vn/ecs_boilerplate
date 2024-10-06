@@ -3,8 +3,10 @@ import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
 
 export class DatabaseStack extends cdk.Stack {
+  public readonly host: cdk.aws_ssm.StringParameter;
+  public readonly port: cdk.aws_ssm.StringParameter;
+  public readonly user: cdk.aws_ssm.StringParameter;
   public readonly password: cdk.aws_ssm.StringParameter;
-  public readonly db: cdk.aws_rds.DatabaseInstance;
 
   constructor(
     scope: Construct,
@@ -15,22 +17,40 @@ export class DatabaseStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    this.password = this.createPassword(proj);
-    this.db = this.createDatabase(proj, vpcStack, this.password);
-  }
+    const database = this.createDatabase(proj, vpcStack);
 
-  private createPassword(proj: string): cdk.aws_ssm.StringParameter {
-    return new cdk.aws_ssm.StringParameter(this, "RDSPassword", {
-      parameterName: `/${proj}/rds/password`,
-      stringValue: process.env.RDS_PASSWORD!,
+    this.host = new cdk.aws_ssm.StringParameter(this, "RDSHOST", {
+      parameterName: `/${proj}/rds/host`,
+      stringValue: database.dbInstanceEndpointAddress,
+      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
+    });
+
+    this.port = new cdk.aws_ssm.StringParameter(this, "RDSPORT", {
+      parameterName: `/${proj}/rds/port`,
+      stringValue: database.dbInstanceEndpointPort,
+      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
+    });
+
+    this.user = new cdk.aws_ssm.StringParameter(this, "RDSUSER", {
+      parameterName: `/${proj}/rds/user`,
+      stringValue: database
+        .secret!.secretValueFromJson("username")!
+        .unsafeUnwrap(),
+      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
+    });
+
+    this.password = new cdk.aws_ssm.StringParameter(this, "RDSPASS", {
+      parameterName: `/${proj}/rds/pass`,
+      stringValue: database
+        .secret!.secretValueFromJson("password")!
+        .unsafeUnwrap(),
       dataType: cdk.aws_ssm.ParameterDataType.TEXT,
     });
   }
 
   private createDatabase(
     proj: string,
-    vpcStack: VPCStack,
-    password: cdk.aws_ssm.StringParameter
+    vpcStack: VPCStack
   ): cdk.aws_rds.DatabaseInstance {
     return new cdk.aws_rds.DatabaseInstance(this, "Database", {
       engine: cdk.aws_rds.DatabaseInstanceEngine.mysql({
@@ -70,7 +90,6 @@ export class DatabaseStack extends cdk.Stack {
       }),
       allocatedStorage: 20,
       publiclyAccessible: false,
-      // credentials: cdk.aws_rds.Credentials.fromSecret(password),
       multiAz: false,
       vpc: vpcStack.vpc,
       databaseName: proj,

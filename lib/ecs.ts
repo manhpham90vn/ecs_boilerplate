@@ -132,9 +132,9 @@ export class ECSStack extends cdk.Stack {
       portMappings: [{ containerPort: 80 }],
       environment: {
         PORT: "80",
-        RDS_HOST: databaseStack.db.dbInstanceEndpointAddress,
-        RDS_PORT: databaseStack.db.dbInstanceEndpointPort,
-        RDS_USER: "admin",
+        RDS_HOST: databaseStack.host.stringValue,
+        RDS_PORT: databaseStack.port.stringValue,
+        RDS_USER: databaseStack.user.stringValue,
         RDS_PASSWORD: databaseStack.password.stringValue,
       },
       logging: cdk.aws_ecs.LogDrivers.awsLogs({
