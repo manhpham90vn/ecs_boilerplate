@@ -17,7 +17,7 @@ export class DatabaseStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    const database = this.createDatabase(proj, vpcStack);
+    const database = this.createDatabase(vpcStack);
 
     this.host = new cdk.aws_ssm.StringParameter(this, "RDSHOST", {
       parameterName: `/${proj}/rds/host`,
@@ -48,10 +48,7 @@ export class DatabaseStack extends cdk.Stack {
     });
   }
 
-  private createDatabase(
-    proj: string,
-    vpcStack: VPCStack
-  ): cdk.aws_rds.DatabaseInstance {
+  private createDatabase(vpcStack: VPCStack): cdk.aws_rds.DatabaseInstance {
     return new cdk.aws_rds.DatabaseInstance(this, "Database", {
       engine: cdk.aws_rds.DatabaseInstanceEngine.mysql({
         version: cdk.aws_rds.MysqlEngineVersion.VER_8_0_39,
