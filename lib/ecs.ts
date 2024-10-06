@@ -1,6 +1,7 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
+import { DatabaseStack } from "./database";
 
 export class ECSStack extends cdk.Stack {
   public readonly service: cdk.aws_ecs.FargateService;
@@ -13,6 +14,7 @@ export class ECSStack extends cdk.Stack {
     scope: Construct,
     id: string,
     vpcStack: VPCStack,
+    databaseStack: DatabaseStack,
     proj: string,
     props?: cdk.StackProps
   ) {
@@ -30,7 +32,7 @@ export class ECSStack extends cdk.Stack {
 
     this.ecrRepository = this.getEcrRepository();
 
-    this.addContainerToTaskDefinition(proj, taskDefinition);
+    this.addContainerToTaskDefinition(proj, taskDefinition, databaseStack);
 
     const alb = this.createAlb(vpcStack, proj);
     const albSecurityGroup = this.createAlbSecurityGroup(vpcStack);
@@ -81,6 +83,11 @@ export class ECSStack extends cdk.Stack {
         "CloudWatchLogsFullAccess"
       )
     );
+    role.addManagedPolicy(
+      cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
+        "AmazonSSMReadOnlyAccess"
+      )
+    );
     return role;
   }
 
@@ -114,7 +121,8 @@ export class ECSStack extends cdk.Stack {
 
   private addContainerToTaskDefinition(
     proj: string,
-    taskDefinition: cdk.aws_ecs.FargateTaskDefinition
+    taskDefinition: cdk.aws_ecs.FargateTaskDefinition,
+    databaseStack: DatabaseStack
   ): void {
     taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
@@ -124,6 +132,10 @@ export class ECSStack extends cdk.Stack {
       portMappings: [{ containerPort: 80 }],
       environment: {
         PORT: "80",
+        RDS_HOST: databaseStack.db.dbInstanceEndpointAddress,
+        RDS_PORT: databaseStack.db.dbInstanceEndpointPort,
+        RDS_USER: "admin",
+        RDS_PASSWORD: databaseStack.password.stringValue,
       },
       logging: cdk.aws_ecs.LogDrivers.awsLogs({
         streamPrefix: `${proj}-logs`,

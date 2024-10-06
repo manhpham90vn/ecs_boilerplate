@@ -3,6 +3,7 @@ import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
 import { ECSStack } from "./ecs";
 import { DeployStack } from "./deploy";
+import { DatabaseStack } from "./database";
 
 export class EcsBoilerplateStack extends cdk.Stack {
   private proj: string;
@@ -16,7 +17,9 @@ export class EcsBoilerplateStack extends cdk.Stack {
 
     const vpcStack = this.createVPCStack();
 
-    const ecsStack = this.createECSStack(vpcStack);
+    const databaseStack = this.createDatabaseStack(vpcStack);
+
+    const ecsStack = this.createECSStack(vpcStack, databaseStack);
 
     this.createDeployStack(ecsStack);
   }
@@ -36,8 +39,20 @@ export class EcsBoilerplateStack extends cdk.Stack {
     });
   }
 
-  private createECSStack(vpcStack: VPCStack): ECSStack {
-    return new ECSStack(this, "ECSStack", vpcStack, this.proj, {
+  private createDatabaseStack(vpcStack: VPCStack): DatabaseStack {
+    return new DatabaseStack(this, "DatabaseStack", this.proj, vpcStack, {
+      env: {
+        account: this.account,
+        region: this.region,
+      },
+    });
+  }
+
+  private createECSStack(
+    vpcStack: VPCStack,
+    database: DatabaseStack
+  ): ECSStack {
+    return new ECSStack(this, "ECSStack", vpcStack, database, this.proj, {
       env: {
         account: this.account,
         region: this.region,
