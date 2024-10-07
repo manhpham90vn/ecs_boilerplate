@@ -67,7 +67,7 @@ export class ECSStack extends cdk.Stack {
   }
 
   private createExecutionRole(): cdk.aws_iam.Role {
-    const role = new cdk.aws_iam.Role(this, "FargateExecutionRole", {
+    const role = new cdk.aws_iam.Role(this, "EcsExecutionRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
@@ -90,7 +90,7 @@ export class ECSStack extends cdk.Stack {
   }
 
   private createTaskRole(): cdk.aws_iam.Role {
-    return new cdk.aws_iam.Role(this, "FargateTaskRole", {
+    return new cdk.aws_iam.Role(this, "EcsTaskRole", {
       assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
   }

@@ -21,12 +21,7 @@ export class DeployStack extends cdk.Stack {
     const { sourceOutput, buildOutput } = this.createPipelineArtifacts();
 
     const sourceAction = this.createECRSourceAction(ecsStack, sourceOutput);
-    const buildAction = this.createBuildAction(
-      ecsStack,
-      proj,
-      sourceOutput,
-      buildOutput
-    );
+    const buildAction = this.createBuildAction(proj, sourceOutput, buildOutput);
     const approvalAction = this.createManualApprovalAction();
     const deployAction = this.createDeployAction(deploymentGroup, buildOutput);
 
@@ -92,7 +87,6 @@ export class DeployStack extends cdk.Stack {
   }
 
   private createBuildAction(
-    ecsStack: ECSStack,
     proj: string,
     sourceOutput: cdk.aws_codepipeline.Artifact,
     buildOutput: cdk.aws_codepipeline.Artifact
