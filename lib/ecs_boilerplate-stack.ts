@@ -17,9 +17,9 @@ export class EcsBoilerplateStack extends cdk.Stack {
 
     const vpcStack = this.createVPCStack();
 
-    const databaseStack = this.createDatabaseStack(vpcStack);
+    this.createDatabaseStack(vpcStack);
 
-    const ecsStack = this.createECSStack(vpcStack, databaseStack);
+    const ecsStack = this.createECSStack(vpcStack);
 
     this.createDeployStack(ecsStack);
   }
@@ -48,11 +48,8 @@ export class EcsBoilerplateStack extends cdk.Stack {
     });
   }
 
-  private createECSStack(
-    vpcStack: VPCStack,
-    database: DatabaseStack
-  ): ECSStack {
-    return new ECSStack(this, "ECSStack", vpcStack, database, this.proj, {
+  private createECSStack(vpcStack: VPCStack): ECSStack {
+    return new ECSStack(this, "ECSStack", vpcStack, this.proj, {
       env: {
         account: this.account,
         region: this.region,

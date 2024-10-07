@@ -3,11 +3,6 @@ import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
 
 export class DatabaseStack extends cdk.Stack {
-  public readonly host: cdk.aws_ssm.StringParameter;
-  public readonly port: cdk.aws_ssm.StringParameter;
-  public readonly user: cdk.aws_ssm.StringParameter;
-  public readonly password: cdk.aws_ssm.StringParameter;
-
   constructor(
     scope: Construct,
     id: string,
@@ -19,33 +14,67 @@ export class DatabaseStack extends cdk.Stack {
 
     const database = this.createDatabase(vpcStack);
 
-    this.host = new cdk.aws_ssm.StringParameter(this, "RDSHOST", {
-      parameterName: `/${proj}/rds/host`,
-      stringValue: database.dbInstanceEndpointAddress,
-      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
-    });
+    this.createSSMParameter(
+      `/${proj}/rds/host`,
+      database.dbInstanceEndpointAddress,
+      "RDSHOST"
+    );
+    this.createSSMParameter(
+      `/${proj}/rds/port`,
+      database.dbInstanceEndpointPort,
+      "RDSPORT"
+    );
+    this.createSSMParameter(
+      `/${proj}/rds/user`,
+      this.getDatabaseSecret(database, "username"),
+      "RDSUSER"
+    );
+    this.createSSMParameter(
+      `/${proj}/rds/pass`,
+      this.getDatabaseSecret(database, "password"),
+      "RDSPASS"
+    );
+  }
 
-    this.port = new cdk.aws_ssm.StringParameter(this, "RDSPORT", {
-      parameterName: `/${proj}/rds/port`,
-      stringValue: database.dbInstanceEndpointPort,
-      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
-    });
+  private getDatabaseSecret(
+    database: cdk.aws_rds.DatabaseInstance,
+    key: string
+  ): string {
+    return database.secret!.secretValueFromJson(key)!.unsafeUnwrap();
+  }
 
-    this.user = new cdk.aws_ssm.StringParameter(this, "RDSUSER", {
-      parameterName: `/${proj}/rds/user`,
-      stringValue: database
-        .secret!.secretValueFromJson("username")!
-        .unsafeUnwrap(),
+  private createSSMParameter(
+    parameterName: string,
+    value: string,
+    id: string
+  ): cdk.aws_ssm.StringParameter {
+    return new cdk.aws_ssm.StringParameter(this, id, {
+      parameterName: parameterName,
+      stringValue: value,
       dataType: cdk.aws_ssm.ParameterDataType.TEXT,
     });
+  }
 
-    this.password = new cdk.aws_ssm.StringParameter(this, "RDSPASS", {
-      parameterName: `/${proj}/rds/pass`,
-      stringValue: database
-        .secret!.secretValueFromJson("password")!
-        .unsafeUnwrap(),
-      dataType: cdk.aws_ssm.ParameterDataType.TEXT,
-    });
+  private createRdsSecurityGroup(
+    vpcStack: VPCStack
+  ): cdk.aws_ec2.SecurityGroup {
+    const rdsSecurityGroup = new cdk.aws_ec2.SecurityGroup(
+      this,
+      "RDSSecurityGroup",
+      {
+        vpc: vpcStack.vpc,
+        description: "Allow inbound traffic from VPC to RDS",
+        allowAllOutbound: true,
+      }
+    );
+
+    rdsSecurityGroup.addIngressRule(
+      cdk.aws_ec2.Peer.ipv4(vpcStack.vpc.vpcCidrBlock),
+      cdk.aws_ec2.Port.tcp(3306),
+      "Allow MySQL traffic from within VPC"
+    );
+
+    return rdsSecurityGroup;
   }
 
   private createDatabase(vpcStack: VPCStack): cdk.aws_rds.DatabaseInstance {
@@ -86,6 +115,7 @@ export class DatabaseStack extends cdk.Stack {
           ),
         },
       }),
+      securityGroups: [this.createRdsSecurityGroup(vpcStack)],
       allocatedStorage: 20,
       publiclyAccessible: false,
       multiAz: false,

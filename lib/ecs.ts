@@ -1,7 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import { VPCStack } from "./vpc";
-import { DatabaseStack } from "./database";
 
 export class ECSStack extends cdk.Stack {
   public readonly service: cdk.aws_ecs.FargateService;
@@ -14,7 +13,6 @@ export class ECSStack extends cdk.Stack {
     scope: Construct,
     id: string,
     vpcStack: VPCStack,
-    databaseStack: DatabaseStack,
     proj: string,
     props?: cdk.StackProps
   ) {
@@ -32,7 +30,7 @@ export class ECSStack extends cdk.Stack {
 
     this.ecrRepository = this.getEcrRepository();
 
-    this.addContainerToTaskDefinition(proj, taskDefinition, databaseStack);
+    this.addContainerToTaskDefinition(proj, taskDefinition);
 
     const alb = this.createAlb(vpcStack, proj);
     const albSecurityGroup = this.createAlbSecurityGroup(vpcStack);
@@ -121,8 +119,7 @@ export class ECSStack extends cdk.Stack {
 
   private addContainerToTaskDefinition(
     proj: string,
-    taskDefinition: cdk.aws_ecs.FargateTaskDefinition,
-    databaseStack: DatabaseStack
+    taskDefinition: cdk.aws_ecs.FargateTaskDefinition
   ): void {
     taskDefinition.addContainer("Container", {
       image: cdk.aws_ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
@@ -132,21 +129,35 @@ export class ECSStack extends cdk.Stack {
       portMappings: [{ containerPort: 80 }],
       environment: {
         PORT: "80",
-        RDS_HOST: cdk.aws_ssm.StringParameter.valueForStringParameter(
-          this,
-          `/${proj}/rds/host`
+      },
+      secrets: {
+        RDS_HOST: cdk.aws_ecs.Secret.fromSsmParameter(
+          cdk.aws_ssm.StringParameter.fromStringParameterName(
+            this,
+            "RDSHostParameter",
+            `/${proj}/rds/host`
+          )
         ),
-        RDS_PORT: cdk.aws_ssm.StringParameter.valueForStringParameter(
-          this,
-          `/${proj}/rds/port`
+        RDS_PORT: cdk.aws_ecs.Secret.fromSsmParameter(
+          cdk.aws_ssm.StringParameter.fromStringParameterName(
+            this,
+            "RDSPortParameter",
+            `/${proj}/rds/port`
+          )
         ),
-        RDS_USER: cdk.aws_ssm.StringParameter.valueForStringParameter(
-          this,
-          `/${proj}/rds/user`
+        RDS_USER: cdk.aws_ecs.Secret.fromSsmParameter(
+          cdk.aws_ssm.StringParameter.fromStringParameterName(
+            this,
+            "RDSUserParameter",
+            `/${proj}/rds/user`
+          )
         ),
-        RDS_PASSWORD: cdk.aws_ssm.StringParameter.valueForStringParameter(
-          this,
-          `/${proj}/rds/password`
+        RDS_PASSWORD: cdk.aws_ecs.Secret.fromSsmParameter(
+          cdk.aws_ssm.StringParameter.fromStringParameterName(
+            this,
+            "RDSPasswordParameter",
+            `/${proj}/rds/pass`
+          )
         ),
       },
       logging: cdk.aws_ecs.LogDrivers.awsLogs({
