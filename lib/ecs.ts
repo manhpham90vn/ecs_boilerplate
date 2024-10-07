@@ -128,31 +128,28 @@ export class ECSStack extends cdk.Stack {
       cpu: 256,
       portMappings: [{ containerPort: 80 }],
       environment: {
-        PORT: "80",
+        WORDPRESS_DB_NAME: "testdb",
+      },
+      healthCheck: {
+        command: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"],
+        startPeriod: cdk.Duration.seconds(120),
       },
       secrets: {
-        RDS_HOST: cdk.aws_ecs.Secret.fromSsmParameter(
+        WORDPRESS_DB_HOST: cdk.aws_ecs.Secret.fromSsmParameter(
           cdk.aws_ssm.StringParameter.fromStringParameterName(
             this,
             "RDSHostParameter",
             `/${proj}/rds/host`
           )
         ),
-        RDS_PORT: cdk.aws_ecs.Secret.fromSsmParameter(
-          cdk.aws_ssm.StringParameter.fromStringParameterName(
-            this,
-            "RDSPortParameter",
-            `/${proj}/rds/port`
-          )
-        ),
-        RDS_USER: cdk.aws_ecs.Secret.fromSsmParameter(
+        WORDPRESS_DB_USER: cdk.aws_ecs.Secret.fromSsmParameter(
           cdk.aws_ssm.StringParameter.fromStringParameterName(
             this,
             "RDSUserParameter",
             `/${proj}/rds/user`
           )
         ),
-        RDS_PASSWORD: cdk.aws_ecs.Secret.fromSsmParameter(
+        WORDPRESS_DB_PASSWORD: cdk.aws_ecs.Secret.fromSsmParameter(
           cdk.aws_ssm.StringParameter.fromStringParameterName(
             this,
             "RDSPasswordParameter",
@@ -237,7 +234,13 @@ export class ECSStack extends cdk.Stack {
         targetType: cdk.aws_elasticloadbalancingv2.TargetType.IP,
         healthCheck: {
           path: "/",
-          interval: cdk.Duration.seconds(30),
+          port: "80",
+          protocol: cdk.aws_elasticloadbalancingv2.Protocol.HTTP,
+          timeout: cdk.Duration.seconds(60),
+          healthyThresholdCount: 3,
+          unhealthyThresholdCount: 3,
+          interval: cdk.Duration.seconds(180),
+          healthyHttpCodes: "200,302",
         },
       }
     );

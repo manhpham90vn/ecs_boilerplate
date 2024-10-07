@@ -20,11 +20,6 @@ export class DatabaseStack extends cdk.Stack {
       "RDSHOST"
     );
     this.createSSMParameter(
-      `/${proj}/rds/port`,
-      database.dbInstanceEndpointPort,
-      "RDSPORT"
-    );
-    this.createSSMParameter(
       `/${proj}/rds/user`,
       this.getDatabaseSecret(database, "username"),
       "RDSUSER"
