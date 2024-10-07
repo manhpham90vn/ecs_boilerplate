@@ -168,6 +168,10 @@ export class VPCStack extends cdk.Stack {
         id: "CloudWatchLogsEndpoint",
         serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.logs`,
       },
+      {
+        id: "SSMEndpoint",
+        serviceName: `com.amazonaws.${process.env.CDK_DEFAULT_REGION}.ssm`,
+      },
     ];
 
     endpoints.forEach((endpoint) => {
