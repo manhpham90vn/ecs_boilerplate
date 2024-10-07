@@ -81,18 +81,19 @@ export class ECSStack extends cdk.Stack {
         "CloudWatchLogsFullAccess"
       )
     );
+    return role;
+  }
+
+  private createTaskRole(): cdk.aws_iam.Role {
+    const role = new cdk.aws_iam.Role(this, "EcsTaskRole", {
+      assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+    });
     role.addManagedPolicy(
       cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName(
         "AmazonSSMReadOnlyAccess"
       )
     );
     return role;
-  }
-
-  private createTaskRole(): cdk.aws_iam.Role {
-    return new cdk.aws_iam.Role(this, "EcsTaskRole", {
-      assumedBy: new cdk.aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-    });
   }
 
   private createTaskDefinition(
